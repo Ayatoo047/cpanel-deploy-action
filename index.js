@@ -44,15 +44,19 @@ const main = async () => {
             headers: {"Authorization": `cpanel ${cpanel_username}:${cpanel_token}`}
         });
         startDeployRes = startDeployRes.data;
-        core.debug(`startDeployRes: ${JSON.stringify(startDeployRes, null, 2)}`);
+        core.info(`startDeployRes: ${JSON.stringify(startDeployRes, null, 2)}`);
         if (startDeployRes.errors !== null) {
             // noinspection ExceptionCaughtLocallyJS
             throw new Error("Failed to start deployment task: " + JSON.stringify(startDeployRes.errors, null, 2));
         }
-        const taskId = startDeployRes.task_id;
+        // cPanel UAPI wraps the payload under `.data`, but be defensive about the shape.
+        const taskId = startDeployRes.data?.task_id ?? startDeployRes.task_id;
         if (!taskId) {
             // noinspection ExceptionCaughtLocallyJS
-            throw new Error("Failed to start deployment task - task_id = " + taskId);
+            throw new Error(
+                "Failed to start deployment task - no task_id in response. Full response: " +
+                JSON.stringify(startDeployRes, null, 2)
+            );
         }
 
         for (let i=0; i<maxWaitSeconds; i++) {
@@ -61,10 +65,11 @@ const main = async () => {
                 headers: {"Authorization": `cpanel ${cpanel_username}:${cpanel_token}`}
             });
             pollRes = pollRes.data;
-            if (pollRes.errors != null){
-
+            if (pollRes.errors != null) {
+                core.warning(`poll returned errors: ${JSON.stringify(pollRes.errors)}`);
             }
-            const taskData = pollRes.data.filter( info => info.task_id === taskId )[0];
+            const tasks = Array.isArray(pollRes.data) ? pollRes.data : [];
+            const taskData = tasks.filter( info => info != null && info.task_id === taskId )[0];
             if (!taskData) {
                 core.debug(`task ${taskId} not found in poll results`);
                 await new Promise(r => setTimeout(r, 1000));
